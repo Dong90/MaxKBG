@@ -733,6 +733,9 @@ const getWrite = (chat: any, reader: any, stream: boolean) => {
             if (content) {
               ChatManagement.append(chat.id, content)
             }
+            if (chunk.ttft !== undefined) {
+              chat.ttft = chunk.ttft
+            }
             if (chunk.is_end) {
               // 流处理成功 返回成功回调
               return Promise.resolve()
@@ -790,6 +793,7 @@ function chatMessage(chat?: any, problem?: string, re_chat?: boolean) {
       is_stop: false,
       record_id: '',
       vote_status: '-1',
+      dialogue_number: 3,
       status: undefined
     })
     chatList.value.push(chat)
