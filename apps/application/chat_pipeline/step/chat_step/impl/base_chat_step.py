@@ -37,7 +37,7 @@ def add_access_num(client_id=None, client_type=None):
             application_public_access_client.save()
 
 
-def write_context(step, manage, chat_model, request_token, response_token, all_text):
+def write_context(step, manage, request_token, response_token, all_text):
     step.context['message_tokens'] = request_token
     step.context['answer_tokens'] = response_token
     current_time = time.time()
@@ -46,8 +46,6 @@ def write_context(step, manage, chat_model, request_token, response_token, all_t
     manage.context['run_time'] = current_time - manage.context['start_time']
     manage.context['message_tokens'] = manage.context['message_tokens'] + request_token
     manage.context['answer_tokens'] = manage.context['answer_tokens'] + response_token
-    manage.context["chat_model"] = chat_model
-
 
 def event_content(response,
                   chat_id,
