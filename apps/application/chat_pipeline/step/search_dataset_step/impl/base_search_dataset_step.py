@@ -21,8 +21,10 @@ from embedding.models import SearchMode
 from setting.models import Model
 from setting.models_provider import get_model
 from smartdoc.conf import PROJECT_DIR
+from FlagEmbedding import FlagReranker
+from FlagEmbedding import FlagLLMReranker
 
-
+import time
 def get_model_by_id(_id, user_id):
     model = QuerySet(Model).filter(id=_id).first()
     if model is None:
@@ -59,10 +61,43 @@ class BaseSearchDatasetStep(ISearchDatasetStep):
         vector = VectorStore.get_embedding_vector()
         embedding_list = vector.query(exec_problem_text, embedding_value, dataset_id_list, exclude_document_id_list,
                                       exclude_paragraph_id_list, True, top_n, similarity, SearchMode(search_mode))
-        if embedding_list is None:
+        if len(embedding_list)==0:
             return []
         paragraph_list = self.list_paragraph(embedding_list, vector)
-        result = [self.reset_paragraph(paragraph, embedding_list) for paragraph in paragraph_list]
+        # 创建单例重排模型实例
+        singleton_reranker = SingletonFlagReranker()
+
+        queries = [exec_problem_text] * len(paragraph_list)
+        candidates = [hit["content"] for hit in paragraph_list]
+
+        # 计算重排得分
+        rerank_time=time.time()
+        scores = singleton_reranker.compute_score(list(zip(queries, candidates)), normalize=True)
+        print("flag_reranker_time:",time.time()-rerank_time)
+        for i, hit in enumerate(paragraph_list):
+            hit["comprehensive_score"] = scores[i]
+        
+        for i, hit in enumerate(embedding_list):
+            hit["comprehensive_score"] = scores[i]
+        # 重排后进行排序
+        paragraph_list = sorted(paragraph_list, key=lambda p: p["comprehensive_score"], reverse=True)
+
+        # 如果存在直接返回的则取直接返回段落
+        hit_handling_method_paragraph = [paragraph for paragraph in paragraph_list if
+                                         (paragraph.get(
+                                             'hit_handling_method') == 'directly_return' and BaseSearchDatasetStep.get_similarity(
+                                             paragraph, embedding_list) >= paragraph.get(
+                                             'directly_return_similarity'))]
+        if len(hit_handling_method_paragraph) > 0:
+            # 找到评分最高的
+            paragraph_list=[sorted(hit_handling_method_paragraph,
+                           key=lambda p: BaseSearchDatasetStep.get_similarity(p, embedding_list))[-1]]
+        
+        result = [
+            self.reset_paragraph(paragraph, embedding_list)
+            for paragraph in paragraph_list
+            if paragraph["comprehensive_score"] > similarity
+        ]
         return result
 
     @staticmethod
@@ -73,7 +108,7 @@ class BaseSearchDatasetStep(ISearchDatasetStep):
             find_embedding = filter_embedding_list[-1]
             return (ParagraphPipelineModel.builder()
                     .add_paragraph(paragraph)
-                    .add_similarity(find_embedding.get('similarity'))
+                    .add_similarity(find_embedding.get('comprehensive_score'))
                     .add_comprehensive_score(find_embedding.get('comprehensive_score'))
                     .add_dataset_name(paragraph.get('dataset_name'))
                     .add_document_name(paragraph.get('document_name'))
@@ -106,16 +141,7 @@ class BaseSearchDatasetStep(ISearchDatasetStep):
             for paragraph_id in paragraph_id_list:
                 if not exist_paragraph_list.__contains__(paragraph_id):
                     vector.delete_by_paragraph_id(paragraph_id)
-        # 如果存在直接返回的则取直接返回段落
-        hit_handling_method_paragraph = [paragraph for paragraph in paragraph_list if
-                                         (paragraph.get(
-                                             'hit_handling_method') == 'directly_return' and BaseSearchDatasetStep.get_similarity(
-                                             paragraph, embedding_list) >= paragraph.get(
-                                             'directly_return_similarity'))]
-        if len(hit_handling_method_paragraph) > 0:
-            # 找到评分最高的
-            return [sorted(hit_handling_method_paragraph,
-                           key=lambda p: BaseSearchDatasetStep.get_similarity(p, embedding_list))[-1]]
+        
         return paragraph_list
 
     def get_details(self, manage, **kwargs):
@@ -132,3 +158,15 @@ class BaseSearchDatasetStep(ISearchDatasetStep):
             'answer_tokens': 0,
             'cost': 0
         }
+
+class SingletonFlagReranker:
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if not cls._instance:
+            cls._instance = super(SingletonFlagReranker, cls).__new__(cls)
+            cls._instance.reranker = FlagReranker("BAAI/bge-reranker-v2-m3", use_fp16=True)
+        return cls._instance
+
+    def compute_score(self, pairs, normalize=False):
+        return self.reranker.compute_score(pairs, normalize=normalize)

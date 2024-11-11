@@ -6,6 +6,7 @@
     @date：2024/1/9 18:25
     @desc: 对话step Base实现
 """
+import json
 import logging
 import time
 import traceback
@@ -61,12 +62,21 @@ def event_content(response,
                   client_id=None, client_type=None,
                   is_ai_chat: bool = None):
     all_text = ''
+    start_time = time.time()  # 记录调用时间
+    first_chunk_yielded = False
     try:
         for chunk in response:
             all_text += chunk.content
             yield manage.get_base_to_response().to_stream_chunk_response(chat_id, str(chat_record_id), chunk.content,
                                                                          False,
                                                                          0, 0)
+            if first_chunk_yielded==False:
+                ttft = time.time() - start_time                
+                print(f"Time to first token: {ttft}")
+                yield 'data: ' + json.dumps({'chat_id': str(chat_id), 'id': str(chat_record_id), 'operate': True,
+                                         'content': '', 'is_end': False,"ttft":ttft}) + "\n\n"
+                first_chunk_yielded = True
+
         # 获取token
         if is_ai_chat:
             try:

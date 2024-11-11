@@ -9,6 +9,7 @@
 from typing import List
 import logging
 from langchain.schema import HumanMessage
+from langchain.chat_models.base import BaseChatModel
 
 from application.chat_pipeline.step.reset_problem_step.i_reset_problem_step import IResetProblemStep
 from application.models import ChatRecord
@@ -38,8 +39,7 @@ class BaseResetProblemStep(IResetProblemStep):
         reset_prompt = problem_optimization_prompt if problem_optimization_prompt else prompt
 
         flat_list = [item for sublist in contexts for item in (sublist if isinstance(sublist, list) else [sublist])]
-        message_list = [HumanMessage(content=prompt.format(**{'context': flat_list,'question': problem_text}))]
-        response = chat_model.invoke(message_list) 
+        message_list = [HumanMessage(content=reset_prompt.format(**{'context': flat_list,'question': problem_text}))]
         response = chat_model.invoke(message_list)
         padding_problem = problem_text
         if response.content.__contains__("<data>") and response.content.__contains__('</data>'):
